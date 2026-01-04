@@ -177,7 +177,7 @@ int main(int argc, char* argv[])
 
     for (int size : benchmark_sizes)
     {
-        bool run_cpu = !skip_cpu_flag && (size <= 1024);
+        bool run_cpu = !skip_cpu_flag;
         
         make_benchmark(size, run_cpu);
         printf("\n");

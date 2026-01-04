@@ -1,53 +1,73 @@
 #include "../include/matrix_multiply.h"
 #include "../include/error_check.cuh"
 
-#define TILE_SIZE 16
+#define TILE_SIZE 32
+#define THREAD_WORK_SIZE 8
 
 __global__ void matrix_multiply_kernel_tiled(
-    const float *matrix_a,
-    const float *matrix_b,
-    float *matrix_result,
-    const int matrix_a_rows,
-    const int matrix_a_columns,
-    const int matrix_b_columns)
+    const float * __restrict__ matrix_a,
+    const float * __restrict__ matrix_b,
+    float * __restrict__ matrix_result,
+    const int M,
+    const int N,
+    const int K)
 {
     __shared__ float tile_a[TILE_SIZE][TILE_SIZE];
     __shared__ float tile_b[TILE_SIZE][TILE_SIZE];
 
+    float thread_results[THREAD_WORK_SIZE] = {0.0f};
+
     int tx = threadIdx.x;
     int ty = threadIdx.y;
 
-    int row = blockIdx.y * TILE_SIZE + ty;
-    int col = blockIdx.x * TILE_SIZE + tx;
+    int block_row_start = blockIdx.y * TILE_SIZE;
+    int block_col_start = blockIdx.x * TILE_SIZE;
 
-    float dot_product = 0.0f;
-    const int num_tiles = (matrix_a_columns + TILE_SIZE - 1) / TILE_SIZE;
+    const int stride = 4;
 
-    #pragma unroll 8
-    for (int tile_index = 0; tile_index < num_tiles; ++tile_index)
-    {
-        const int tiled_a_col = tile_index * TILE_SIZE + tx;
-        const int tiled_b_row = tile_index * TILE_SIZE + ty;
+    int num_tiles = N / TILE_SIZE;
 
-        tile_a[ty][tx] = (row < matrix_a_rows && tiled_a_col < matrix_a_columns)
-            ? matrix_a[row * matrix_a_columns + tiled_a_col]
-            : 0.0f;
+    for (int tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
+        int tiled_col = tile_idx * TILE_SIZE + tx;
+        int tiled_row = tile_idx * TILE_SIZE + ty;
 
-        tile_b[ty][tx] = (col < matrix_b_columns && tiled_b_row < matrix_a_columns)
-            ? matrix_b[tiled_b_row * matrix_b_columns + col]
-            : 0.0f;
+        #pragma unroll 8
+        for (int i = 0; i < THREAD_WORK_SIZE; ++i) {
+            int local_row = ty + i * stride;
+            
+            int global_row_a = block_row_start + local_row;
+            int global_col_a = tiled_col;
+            tile_a[local_row][tx] = matrix_a[global_row_a * N + global_col_a];
+
+            int global_row_b = tiled_row + i * stride; 
+            int global_col_b = block_col_start + tx;
+            tile_b[local_row][tx] = matrix_b[global_row_b * K + global_col_b];
+        }
 
         __syncthreads();
 
-        #pragma unroll 8
-        for (int k = 0; k < TILE_SIZE; ++k)
-            dot_product += tile_a[ty][k] * tile_b[k][tx];
+        #pragma unroll 32
+        for (int k = 0; k < TILE_SIZE; ++k) {
+            float b_val = tile_b[k][tx];
+            
+            #pragma unroll 8
+            for (int i = 0; i < THREAD_WORK_SIZE; ++i) {
+                int local_row = ty + i * stride;
+                thread_results[i] += tile_a[local_row][k] * b_val;
+            }
+        }
 
         __syncthreads();
     }
 
-    if (row < matrix_a_rows && col < matrix_b_columns)
-        matrix_result[row * matrix_b_columns + col] = dot_product;
+    #pragma unroll 8
+    for (int i = 0; i < THREAD_WORK_SIZE; ++i) {
+        int local_row = ty + i * stride;
+        int global_row = block_row_start + local_row;
+        int global_col = block_col_start + tx;
+        
+        matrix_result[global_row * K + global_col] = thread_results[i];
+    }
 }
 
 void launch_matrix_multiply_tiled(
@@ -59,10 +79,11 @@ void launch_matrix_multiply_tiled(
     const int matrix_b_columns,
     cudaStream_t stream)
 {
-    dim3 block_size(TILE_SIZE, TILE_SIZE);
+    dim3 block_size(TILE_SIZE, 4);
+    
     dim3 grid_size(
-        (matrix_b_columns + block_size.x - 1) / block_size.x,
-        (matrix_a_rows + block_size.y - 1) / block_size.y);
+        matrix_b_columns / TILE_SIZE,
+        matrix_a_rows / TILE_SIZE);
 
     matrix_multiply_kernel_tiled<<<grid_size, block_size, 0, stream>>>(
         d_matrix_a, d_matrix_b, d_matrix_result,

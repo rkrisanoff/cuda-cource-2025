@@ -40,7 +40,7 @@ void launch_matrix_multiply_basic(
     const int matrix_b_columns,
     cudaStream_t stream)
 {
-    const int tile_size = 16;
+    const int tile_size = 32;
     dim3 block_size(tile_size, tile_size);
     dim3 grid_size(
         (matrix_b_columns + block_size.x - 1) / block_size.x,
