@@ -77,10 +77,6 @@ void make_benchmark(int matrix_size, bool run_cpu_benchmark)
     CUDA_CHECK(cudaMalloc(&device_result_basic, matrix_result_byte_size));
     CUDA_CHECK(cudaMalloc(&device_result_tiled, matrix_result_byte_size));
 
-    cudaStream_t stream_basic, stream_tiled;
-    CUDA_CHECK(cudaStreamCreate(&stream_basic));
-    CUDA_CHECK(cudaStreamCreate(&stream_tiled));
-
     cudaEvent_t start_basic, stop_basic, start_tiled, stop_tiled;
     CUDA_CHECK(cudaEventCreate(&start_basic));
     CUDA_CHECK(cudaEventCreate(&stop_basic));
@@ -93,15 +89,13 @@ void make_benchmark(int matrix_size, bool run_cpu_benchmark)
     CUDA_CHECK(cudaMemcpy(device_matrix_b, host_matrix_b, matrix_b_byte_size, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    CUDA_CHECK(cudaEventRecord(start_basic, stream_basic));
-    launch_matrix_multiply_basic(device_matrix_a, device_matrix_b, device_result_basic, rows_a, cols_a, cols_b, stream_basic);
-    CUDA_CHECK(cudaMemcpyAsync(host_result_basic, device_result_basic, matrix_result_byte_size, cudaMemcpyDeviceToHost, stream_basic));
-    CUDA_CHECK(cudaEventRecord(stop_basic, stream_basic));
+    CUDA_CHECK(cudaEventRecord(start_basic));
+    launch_matrix_multiply_basic(device_matrix_a, device_matrix_b, device_result_basic, rows_a, cols_a, cols_b);
+    CUDA_CHECK(cudaEventRecord(stop_basic));
 
-    CUDA_CHECK(cudaEventRecord(start_tiled, stream_tiled));
-    launch_matrix_multiply_tiled(device_matrix_a, device_matrix_b, device_result_tiled, rows_a, cols_a, cols_b, stream_tiled);
-    CUDA_CHECK(cudaMemcpyAsync(host_result_tiled, device_result_tiled, matrix_result_byte_size, cudaMemcpyDeviceToHost, stream_tiled));
-    CUDA_CHECK(cudaEventRecord(stop_tiled, stream_tiled));
+    CUDA_CHECK(cudaEventRecord(start_tiled));
+    launch_matrix_multiply_tiled(device_matrix_a, device_matrix_b, device_result_tiled, rows_a, cols_a, cols_b);
+    CUDA_CHECK(cudaEventRecord(stop_tiled));
 
     double cpu_time_us = 0.0;
     if (run_cpu_benchmark) {
@@ -110,8 +104,11 @@ void make_benchmark(int matrix_size, bool run_cpu_benchmark)
         });
     }
 
-    CUDA_CHECK(cudaStreamSynchronize(stream_basic));
-    CUDA_CHECK(cudaStreamSynchronize(stream_tiled));
+    CUDA_CHECK(cudaEventSynchronize(stop_basic));
+    CUDA_CHECK(cudaEventSynchronize(stop_tiled));
+
+    CUDA_CHECK(cudaMemcpy(host_result_basic, device_result_basic, matrix_result_byte_size, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(host_result_tiled, device_result_tiled, matrix_result_byte_size, cudaMemcpyDeviceToHost));
 
     float ms_basic = 0, ms_tiled = 0;
     CUDA_CHECK(cudaEventElapsedTime(&ms_basic, start_basic, stop_basic));
@@ -154,8 +151,7 @@ void make_benchmark(int matrix_size, bool run_cpu_benchmark)
     CUDA_CHECK(cudaEventDestroy(start_tiled));
     CUDA_CHECK(cudaEventDestroy(stop_tiled));
 
-    CUDA_CHECK(cudaStreamDestroy(stream_basic));
-    CUDA_CHECK(cudaStreamDestroy(stream_tiled));
+
 }
 
 int main(int argc, char* argv[])

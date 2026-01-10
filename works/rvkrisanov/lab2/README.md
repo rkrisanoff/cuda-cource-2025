@@ -5,24 +5,25 @@
 
 ## Реализация
 1.  **CPU**: Классический алгоритм `O(N^3)`.
-2.  **GPU Basic**: Наивная реализация (глобальная память).
-3.  **GPU Tiled**: Оптимизация с Shared Memory (Tile 32x32) + **Thread Coarsening**.
-    *   Каждый поток вычисляет 8 элементов результата для увеличения арифметической интенсивности.
-    *   Использование `#pragma unroll` для разворачивания циклов.
+2.  **GPU Basic**: Наивная реализация (глобальная память, один элемент на поток).
+3.  **GPU Tiled**: Оптимизация с Shared Memory (Tile 16×16).
+    *   Каждый поток вычисляет один элемент результирующей матрицы.
+    *   Тайлы загружаются в `__shared__` память, что снижает количество обращений к глобальной памяти.
+    *   Использование `#pragma unroll` для разворачивания внутреннего цикла умножения.
 
-## Результаты (Turing GPU)
+## Результаты
 
-| Matrix Size | CPU (us) | CUDA Basic (us) | CUDA Tiled (us) | Speedup (Basic vs CPU) | Speedup (Tiled vs Basic) |
-|---|---|---|---|---|---|
-| 64x64 | 333 | 166 | **101** | 2.00x | **1.64x** |
-| 128x128 | 3,405 | 32 | **20** | 106x | **1.60x** |
-| 512x512 | 209,305 | 384 | **358** | 545x | **1.07x** |
-| 1024x1024 | 3,389,726 | 2,466 | **2,307** | 1374x | **1.07x** |
-| 2048x2048 | 38,546,840 | 17,936 | **16,820** | 2149x | **1.06x** |
+| Matrix Size | CPU (us) | CUDA Basic (us) | CUDA Tiled (us) | Speedup (Basic vs CPU) | Speedup (Tiled vs CPU) | Speedup (Tiled vs Basic) |
+|---|---|---|---|---|---|---|
+| 128x128 | 1,175 | 100 | **9** | 11.79x | **127.50x** | **11.11x** |
+| 256x256 | 14,274 | 82 | **41** | 173.36x | **348.49x** | **2.00x** |
+| 512x512 | 228,354 | 409 | **280** | 558.64x | **816.86x** | **1.46x** |
+| 1024x1024 | 6,842,508 | 3,047 | **2,167** | 2,245.55x | **3,157.91x** | **1.41x** |
+| 2048x2048 | 163,040,304 | 22,604 | **17,243** | 7,212.81x | **9,455.37x** | **1.31x** |
 
 **Анализ:**
-*   **Tiled версия быстрее**: Благодаря использованию Shared Memory и Thread Coarsening удалось добиться ускорения относительно наивной версии на всех размерах матриц.
-*   **Thread Coarsening**: Внедрение техники "1 поток считает 8 элементов" позволило существенно сократить время выполнения Tiled версии на больших матрицах, снизив количество обращений к Shared Memory.
+*   **Tiled версия заметно быстрее naive**: Использование Shared Memory с тайлингом обеспечивает ускорение относительно базовой версии на всех размерах. Эффект растёт с увеличением матриц.
+*   **Tile size 16×16**: Классический размер тайла без thread coarsening даёт оптимальный баланс между occupancy и shared memory footprint для данной архитектуры.
 
 ## Запуск
 ```bash
@@ -31,36 +32,33 @@ make
 ```
 
 ```bash
-(base) jovyan@a52120adfa7c:~/repos/cuda-cource-2025/works/rvkrisanov/lab2$ make
-nvcc -O2 -arch=sm_70 -std=c++14 -Iinclude -o matrix_multiply src/main.cu src/matrix_multiply_cpu.cu src/matrix_multiply_cuda.cu src/matrix_multiply_cuda_tiled.cu
+$ make
+nvcc -O2 -std=c++14 -Iinclude -o matrix_multiply src/main.cu src/matrix_multiply_cpu.cu src/matrix_multiply_cuda.cu src/matrix_multiply_cuda_tiled.cu
 ./matrix_multiply
-Benchmarking Matrix 64x64...
-  CPU:             333 us
-  CUDA Basic:      166 us (2.00x speedup) [OK]
-  CUDA Tiled:      101 us (3.29x speedup) [OK]
-
 Benchmarking Matrix 128x128...
-  CPU:            3405 us
-  CUDA Basic:       32 us (106.40x speedup) [OK]
-  CUDA Tiled:       20 us (170.25x speedup) [OK]
+  CPU:            1175 us
+  CUDA Basic:      100 us (11.79x speedup) [OK]
+  CUDA Tiled:        9 us (127.50x speedup) [OK]
 
 Benchmarking Matrix 256x256...
-  CPU:           29691 us
-  CUDA Basic:       83 us (357.72x speedup) [OK]
-  CUDA Tiled:       79 us (375.83x speedup) [OK]
+  CPU:           14274 us
+  CUDA Basic:       82 us (173.36x speedup) [OK]
+  CUDA Tiled:       41 us (348.49x speedup) [OK]
 
 Benchmarking Matrix 512x512...
-  CPU:          209305 us
-  CUDA Basic:      384 us (545.06x speedup) [OK]
-  CUDA Tiled:      358 us (584.65x speedup) [OK]
+  CPU:          228354 us
+  CUDA Basic:      409 us (558.64x speedup) [OK]
+  CUDA Tiled:      280 us (816.86x speedup) [OK]
 
 Benchmarking Matrix 1024x1024...
-  CPU:         3389726 us
-  CUDA Basic:     2466 us (1374.58x speedup) [OK]
-  CUDA Tiled:     2307 us (1469.32x speedup) [OK]
+  CPU:         6842508 us
+  CUDA Basic:     3047 us (2245.55x speedup) [OK]
+  CUDA Tiled:     2167 us (3157.91x speedup) [OK]
 
 Benchmarking Matrix 2048x2048...
-  CPU:        38546840 us
-  CUDA Basic:    17936 us (2149.13x speedup) [OK]
-  CUDA Tiled:    16820 us (2291.72x speedup) [OK]
-```
+  CPU:        163040304 us
+  CUDA Basic:    22604 us (7212.81x speedup) [OK]
+  CUDA Tiled:    17243 us (9455.37x speedup) [OK]
+
+## Анализ бенчмарков других студентов
+См. [BENCHMARK_ANALYSIS.md](./BENCHMARK_ANALYSIS.md) — детальный разбор проблем в реализациях коллег и почему их нельзя использовать для сравнения.
